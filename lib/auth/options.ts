@@ -9,14 +9,14 @@ const providers: AuthOptions["providers"] = [
   CredentialsProvider({
     name: "Email",
     credentials: {
-      name: { label: "Name", type: "text" },
-      email: { label: "Email", type: "email" }
+      email: { label: "Email", type: "email" },
+      password: { label: "Password", type: "password" }
     },
     async authorize(credentials) {
-      const user = await AuthService.upsertFromCredentials({
-        name: credentials?.name,
-        email: credentials?.email
-      });
+      const user = await AuthService.authenticate(
+        credentials?.email,
+        credentials?.password
+      );
 
       if (!user) {
         return null;

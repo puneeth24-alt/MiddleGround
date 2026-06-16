@@ -52,7 +52,7 @@ export class FileStore {
     return result as T;
   }
 
-  static async upsertUser(input: { email: string; name?: string | null; image?: string | null }): Promise<UserRecord> {
+  static async upsertUser(input: { email: string; name?: string | null; image?: string | null; password?: string }): Promise<UserRecord> {
     const email = input.email.trim().toLowerCase();
 
     return FileStore.update((store) => {
@@ -60,6 +60,9 @@ export class FileStore {
       if (existing) {
         existing.name = input.name ?? existing.name;
         existing.image = input.image ?? existing.image;
+        if (input.password !== undefined) {
+          existing.password = input.password;
+        }
         return existing;
       }
 
@@ -69,6 +72,7 @@ export class FileStore {
         email,
         name: input.name ?? email.split("@")[0],
         image: input.image ?? null,
+        password: input.password,
         createdAt: now
       };
 

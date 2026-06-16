@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.0",
+    "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.44.6",
     "lru-cache": "^11.2.2",
     "lucide-react": "^0.468.0",
@@ -25,6 +26,7 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/mapbox-gl": "^3.4.1",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",

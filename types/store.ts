@@ -6,6 +6,7 @@ export interface UserRecord {
   id: string;
   name: string | null;
   email: string;
+  password?: string;
   image: string | null;
   createdAt: string;
 }

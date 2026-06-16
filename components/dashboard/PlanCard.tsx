@@ -1,18 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { Copy, MapPinned } from "lucide-react";
+import { Copy, MapPinned, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import type { PlanDetail } from "@/types/plan";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 
 export function PlanCard({ plan, appUrl }: { plan: PlanDetail; appUrl: string }) {
+  const router = useRouter();
   const shareUrl = `${appUrl}/join/${plan.shareToken}`;
 
   async function copy() {
     await navigator.clipboard.writeText(shareUrl);
     toast.success("Share link copied");
+  }
+
+  async function handleDelete() {
+    if (!window.confirm("Are you sure you want to delete this plan?")) return;
+    
+    try {
+      const response = await fetch(`/api/plans/${plan.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete plan");
+      
+      toast.success("Plan deleted");
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete plan");
+    }
   }
 
   return (
@@ -26,14 +42,20 @@ export function PlanCard({ plan, appUrl }: { plan: PlanDetail; appUrl: string })
         </div>
         <Badge tone={plan.status === "active" ? "green" : plan.status === "locked" ? "amber" : "neutral"}>{plan.status}</Badge>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Link href={`/plans/${plan.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white transition hover:bg-neutral-800">
-          <MapPinned className="h-4 w-4" aria-hidden="true" />
-          Open
-        </Link>
-        <Button type="button" variant="secondary" onClick={copy}>
-          <Copy className="h-4 w-4" aria-hidden="true" />
-          Copy
+      <div className="flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex flex-wrap gap-2">
+          <Link href={`/plans/${plan.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-neutral-950 px-4 text-sm font-medium text-white transition hover:bg-neutral-800">
+            <MapPinned className="h-4 w-4" aria-hidden="true" />
+            Open
+          </Link>
+          <Button type="button" variant="secondary" onClick={copy}>
+            <Copy className="h-4 w-4" aria-hidden="true" />
+            Copy
+          </Button>
+        </div>
+        <Button type="button" variant="secondary" onClick={handleDelete} className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200">
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+          Delete
         </Button>
       </div>
     </article>

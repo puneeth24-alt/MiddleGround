@@ -252,6 +252,7 @@ export class PlanService {
       }
 
       store.locations = store.locations.filter((item) => item.id !== locId);
+      store.participants = store.participants.filter((item) => item.id !== location.participantId);
       recalculatePlanMidpoint(store, plan);
       plan.updatedAt = now();
 
