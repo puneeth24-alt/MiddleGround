@@ -42,13 +42,20 @@ export function LoginForm({ githubEnabled, googleEnabled }: { githubEnabled: boo
         });
         
         if (signInRes?.error) {
-          throw new Error("Invalid email or password");
+          console.error("[LoginForm] Post-registration sign in error:", signInRes.error);
+          throw new Error(signInRes.error || "Could not sign in after registration");
+        }
+
+        if (!signInRes?.ok) {
+          throw new Error("Sign in after registration failed");
         }
         
         router.push("/dashboard");
         router.refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
+        const errorMsg = err instanceof Error ? err.message : "An error occurred";
+        console.error("[LoginForm] Signup error:", errorMsg);
+        setError(errorMsg);
         setLoading(false);
       }
     } else {
@@ -60,13 +67,20 @@ export function LoginForm({ githubEnabled, googleEnabled }: { githubEnabled: boo
         });
 
         if (res?.error) {
-          throw new Error("Invalid email or password");
+          console.error("[LoginForm] Sign in error:", res.error);
+          throw new Error(res.error || "Invalid email or password");
+        }
+
+        if (!res?.ok) {
+          throw new Error("Sign in failed. Please check your credentials.");
         }
         
         router.push("/dashboard");
         router.refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "An error occurred");
+        const errorMsg = err instanceof Error ? err.message : "An error occurred";
+        console.error("[LoginForm] Catch error:", errorMsg);
+        setError(errorMsg);
         setLoading(false);
       }
     }

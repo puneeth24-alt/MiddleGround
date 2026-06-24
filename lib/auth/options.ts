@@ -13,21 +13,34 @@ const providers: AuthOptions["providers"] = [
       password: { label: "Password", type: "password" }
     },
     async authorize(credentials) {
-      const user = await AuthService.authenticate(
-        credentials?.email,
-        credentials?.password
-      );
+      try {
+        if (!credentials?.email || !credentials?.password) {
+          console.error("[CredentialsProvider] Missing email or password");
+          return null;
+        }
 
-      if (!user) {
+        const user = await AuthService.authenticate(
+          credentials.email,
+          credentials.password
+        );
+
+        if (!user) {
+          console.warn("[CredentialsProvider] Authentication failed for email:", credentials.email);
+          return null;
+        }
+
+        console.log("[CredentialsProvider] User authenticated:", user.email);
+
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image
+        };
+      } catch (error) {
+        console.error("[CredentialsProvider] Authorization error:", error);
         return null;
       }
-
-      return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        image: user.image
-      };
     }
   })
 ];
@@ -60,10 +73,15 @@ export const authOptions: AuthOptions = {
   },
   secret: env.NEXTAUTH_SECRET ?? "middleground-local-development-secret",
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
-        const localUser = await AuthService.upsertFromProfile(user);
-        token.id = localUser?.id ?? user.id;
+        try {
+          const localUser = await AuthService.upsertFromProfile(user);
+          token.id = localUser?.id ?? user.id;
+        } catch (error) {
+          console.error("[NextAuth] JWT callback error:", error);
+          throw new Error(`JWT callback failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
       }
 
       return token;
@@ -74,6 +92,14 @@ export const authOptions: AuthOptions = {
       }
 
       return session;
+    }
+  },
+  events: {
+    async signIn({ user, account, profile, isNewUser }) {
+      console.log("[NextAuth] User signed in:", { email: user.email, provider: account?.provider, isNewUser });
+    },
+    async error({ error }) {
+      console.error("[NextAuth] Error:", error);
     }
   }
 };

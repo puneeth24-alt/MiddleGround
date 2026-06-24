@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { PlanDetail } from "@/types/plan";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { geocodeAddress } from "@/app/actions/geocode";
 
 interface LocationInputProps {
   planId: string;
@@ -27,7 +28,7 @@ export function LocationInput({ planId, storageKey, disabled, defaultNickname, o
   const [lng, setLng] = useState("");
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
-  const hasMapboxToken = Boolean(process.env.NEXT_PUBLIC_MAPBOX_TOKEN);
+  const hasGeocoding = true;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -38,7 +39,7 @@ export function LocationInput({ planId, storageKey, disabled, defaultNickname, o
       let nextLng = Number(lng);
       let nextDisplayName = displayName.trim();
 
-      if ((!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) && hasMapboxToken && nextDisplayName) {
+      if ((!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) && hasGeocoding && nextDisplayName) {
         const geocoded = await geocodeAddress(nextDisplayName);
         nextLat = geocoded.lat;
         nextLng = geocoded.lng;
@@ -107,11 +108,11 @@ export function LocationInput({ planId, storageKey, disabled, defaultNickname, o
     <form onSubmit={submit} className="grid gap-3 rounded-md border border-neutral-200 bg-white p-4">
       <Input label="Name" name="nickname" value={nickname} maxLength={100} onChange={(event) => setNickname(event.target.value)} required disabled={disabled} />
       <Input
-        label={hasMapboxToken ? "Address or place" : "Location label"}
+        label={hasGeocoding ? "Address or place" : "Location label"}
         name="displayName"
         value={displayName}
         onChange={(event) => setDisplayName(event.target.value)}
-        placeholder={hasMapboxToken ? "Searchable address" : "Home, office, campus"}
+        placeholder={hasGeocoding ? "Searchable address" : "Home, office, campus"}
         disabled={disabled}
         required
       />
@@ -131,40 +132,4 @@ export function LocationInput({ planId, storageKey, disabled, defaultNickname, o
       </div>
     </form>
   );
-}
-
-async function geocodeAddress(address: string): Promise<{ lat: number; lng: number; displayName: string }> {
-  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  if (!token) {
-    throw new Error("Mapbox token is not configured");
-  }
-
-  const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json`);
-  url.searchParams.set("access_token", token);
-  url.searchParams.set("limit", "1");
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Address lookup failed");
-  }
-
-  const data = (await response.json()) as {
-    features: Array<{
-      place_name?: string;
-      text?: string;
-      geometry: { coordinates: [number, number] };
-    }>;
-  };
-  const first = data.features[0];
-
-  if (!first) {
-    throw new Error("No address result found");
-  }
-
-  const [lng, lat] = first.geometry.coordinates;
-  return {
-    lat,
-    lng,
-    displayName: first.place_name ?? first.text ?? address
-  };
 }

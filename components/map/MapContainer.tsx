@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Map, Marker } from "mapbox-gl";
+import type { Map, Marker } from "maplibre-gl";
 import type { ParticipantLocation } from "@/types/location";
 import type { NormalisedPlace } from "@/types/places";
 import type { PlanParticipant } from "@/types/participant";
@@ -43,7 +43,6 @@ export function MapContainer({
   const mapRef = useRef<Map | null>(null);
   const markerRefs = useRef<Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
-  const hasMapboxToken = Boolean(process.env.NEXT_PUBLIC_MAPBOX_TOKEN);
 
   const participantLocations = useMemo(
     () => participants.filter((participant) => participant.location),
@@ -53,29 +52,28 @@ export function MapContainer({
   const center = midpoint ?? participantLocations[0]?.location ?? places[0] ?? { lat: 20, lng: 0 };
 
   useEffect(() => {
-    if (!hasMapboxToken || !containerRef.current || mapRef.current) {
+    if (!containerRef.current || mapRef.current) {
       return;
     }
 
     let cancelled = false;
 
     async function mountMap() {
-      const module = await import("mapbox-gl");
-      const mapboxgl = module.default;
+      const module = await import("maplibre-gl");
+      const maplibregl = module.default;
 
       if (cancelled || !containerRef.current) {
         return;
       }
 
-      mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
-      const map = new mapboxgl.Map({
+      const map = new maplibregl.Map({
         container: containerRef.current,
-        style: "mapbox://styles/mapbox/streets-v12",
+        style: "https://demotiles.maplibre.org/style.json",
         center: [center.lng, center.lat],
         zoom: participantLocations.length > 1 ? 10 : 12
       });
 
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       map.on("load", () => setMapReady(true));
       mapRef.current = map;
     }
@@ -90,18 +88,18 @@ export function MapContainer({
       mapRef.current = null;
       setMapReady(false);
     };
-  }, [center.lat, center.lng, hasMapboxToken, participantLocations.length]);
+  }, [center.lat, center.lng, participantLocations.length]);
 
   useEffect(() => {
-    if (!hasMapboxToken || !mapReady || !mapRef.current) {
+    if (!mapReady || !mapRef.current) {
       return;
     }
 
     let disposed = false;
 
     async function renderMarkers() {
-      const module = await import("mapbox-gl");
-      const mapboxgl = module.default;
+      const module = await import("maplibre-gl");
+      const maplibregl = module.default;
       const map = mapRef.current;
 
       if (!map || disposed) {
@@ -117,26 +115,26 @@ export function MapContainer({
         }
 
         const element = document.createElement("div");
-        element.className = "mapbox-participant-pin";
+        element.className = "maplibre-participant-pin";
         element.style.backgroundColor = participant.avatarColor;
         element.textContent = participant.nickname.charAt(0).toUpperCase();
-        markerRefs.current.push(new mapboxgl.Marker(element).setLngLat([participant.location.lng, participant.location.lat]).addTo(map));
+        markerRefs.current.push(new maplibregl.Marker({ element }).setLngLat([participant.location.lng, participant.location.lat]).addTo(map));
       }
 
       places.forEach((place, index) => {
         const element = document.createElement("button");
-        element.className = `mapbox-place-pin ${selectedPlaceId === place.id ? "is-active" : ""}`;
+        element.className = `maplibre-place-pin ${selectedPlaceId === place.id ? "is-active" : ""}`;
         element.textContent = String(index + 1);
         element.title = place.name;
         element.addEventListener("mouseenter", () => onPlaceHover?.(place.id));
         element.addEventListener("mouseleave", () => onPlaceHover?.(null));
-        markerRefs.current.push(new mapboxgl.Marker(element).setLngLat([place.lng, place.lat]).addTo(map));
+        markerRefs.current.push(new maplibregl.Marker({ element }).setLngLat([place.lng, place.lat]).addTo(map));
       });
 
       if (midpoint) {
         const element = document.createElement("div");
-        element.className = "mapbox-midpoint-pin";
-        markerRefs.current.push(new mapboxgl.Marker(element).setLngLat([midpoint.lng, midpoint.lat]).addTo(map));
+        element.className = "maplibre-midpoint-pin";
+        markerRefs.current.push(new maplibregl.Marker({ element }).setLngLat([midpoint.lng, midpoint.lat]).addTo(map));
         upsertCircle(map, midpoint, radiusMeters);
       }
 
@@ -147,7 +145,7 @@ export function MapContainer({
       ];
 
       if (coordinates.length > 1) {
-        const bounds = coordinates.reduce((box, coord) => box.extend(coord), new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]));
+        const bounds = coordinates.reduce((box, coord) => box.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
         map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 600 });
       } else {
         map.easeTo({ center: [center.lng, center.lat], zoom: 12, duration: 600 });
@@ -159,61 +157,7 @@ export function MapContainer({
     return () => {
       disposed = true;
     };
-  }, [center.lat, center.lng, hasMapboxToken, mapReady, midpoint, onPlaceHover, participantLocations, places, radiusMeters, selectedPlaceId]);
-
-  const fallback = useFallbackProjection(participantLocations, places, midpoint);
-
-  if (!hasMapboxToken) {
-    return (
-      <div className="relative min-h-[460px] overflow-hidden rounded-md border border-neutral-200 bg-neutral-100">
-        <div className="fallback-map-bg" />
-        {midpoint ? (
-          <div className="absolute" style={{ left: `${fallback.midpoint?.x ?? 50}%`, top: `${fallback.midpoint?.y ?? 50}%` }}>
-            <VicinityCircle sizePercent={Math.min(58, Math.max(32, radiusMeters / 90))} />
-          </div>
-        ) : null}
-        {places.map((place, index) => {
-          const point = fallback.places.find((item) => item.id === place.id);
-          return point ? (
-            <button
-              key={place.id}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${point.x}%`, top: `${point.y}%` }}
-              onMouseEnter={() => onPlaceHover?.(place.id)}
-              onMouseLeave={() => onPlaceHover?.(null)}
-              title={place.name}
-            >
-              <PlaceMarker index={index + 1} active={selectedPlaceId === place.id} />
-            </button>
-          ) : null;
-        })}
-        {participantLocations.map((participant) => {
-          const point = fallback.participants.find((item) => item.id === participant.id);
-          return point && participant.location ? (
-            <div
-              key={participant.id}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${point.x}%`, top: `${point.y}%` }}
-              title={participant.location.displayName}
-            >
-              <ParticipantMarker name={participant.nickname} color={participant.avatarColor} />
-            </div>
-          ) : null;
-        })}
-        {fallback.midpoint ? (
-          <div
-            className="absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: `${fallback.midpoint.x}%`, top: `${fallback.midpoint.y}%` }}
-          >
-            <MidpointMarker />
-          </div>
-        ) : null}
-        <div className="absolute bottom-3 left-3 rounded-md border border-neutral-200 bg-white/90 px-3 py-2 text-xs font-medium text-neutral-700 shadow-sm">
-          Local map preview
-        </div>
-      </div>
-    );
-  }
+  }, [center.lat, center.lng, mapReady, midpoint, onPlaceHover, participantLocations, places, radiusMeters, selectedPlaceId]);
 
   return <div ref={containerRef} className="min-h-[460px] overflow-hidden rounded-md border border-neutral-200 bg-neutral-100" />;
 }

@@ -1,7 +1,7 @@
 import type { LocationInput, ParticipantLocation } from "@/types/location";
 import type { CreatePlanInput, Plan, PlanDetail, PlanStatus, UpdatePlanInput } from "@/types/plan";
 import type { PlanParticipant } from "@/types/participant";
-import { FileStore } from "@/lib/store/file-store";
+import { supabase } from "@/lib/supabase/client";
 import { colorForSeed } from "@/utils/colors";
 import { calculateMidpoint, isValidCoordinate } from "@/utils/geo";
 import { generateShareToken } from "@/utils/tokens";
@@ -10,40 +10,64 @@ export class NotFoundError extends Error {}
 export class ForbiddenError extends Error {}
 export class ConflictError extends Error {}
 
-function now(): string {
-  return new Date().toISOString();
-}
-
-function detailForPlan(store: Awaited<ReturnType<typeof FileStore.read>>, plan: Plan): PlanDetail {
-  const participants = store.participants.filter((participant) => participant.planId === plan.id);
-  const locations = store.locations.filter((location) => location.planId === plan.id);
-
+function mapPlanDetail(row: any): PlanDetail {
   return {
-    ...plan,
-    participants,
-    locations
+    id: row.id,
+    ownerId: row.owner_id,
+    title: row.title,
+    shareToken: row.share_token,
+    status: row.status as PlanStatus,
+    radiusMeters: row.radius_meters,
+    midpointLat: row.midpoint_lat,
+    midpointLng: row.midpoint_lng,
+    maxParticipants: row.max_participants,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    participants: (row.plan_participants || []).map((p: any) => ({
+      id: p.id,
+      planId: p.plan_id,
+      userId: p.user_id,
+      nickname: p.nickname,
+      avatarColor: p.avatar_color,
+      joinedAt: p.joined_at
+    })),
+    locations: (row.locations || []).map((l: any) => ({
+      id: l.id,
+      participantId: l.participant_id,
+      planId: l.plan_id,
+      displayName: l.display_name,
+      lat: l.lat,
+      lng: l.lng,
+      createdAt: l.created_at,
+      updatedAt: l.updated_at
+    }))
   };
 }
 
 export class PlanService {
   static async listPlansForOwner(ownerId: string): Promise<PlanDetail[]> {
-    const store = await FileStore.read();
+    const { data, error } = await supabase
+      .from("plans")
+      .select("*, plan_participants(*), locations(*)")
+      .eq("owner_id", ownerId)
+      .order("updated_at", { ascending: false });
 
-    return store.plans
-      .filter((plan) => plan.ownerId === ownerId)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map((plan) => detailForPlan(store, plan));
+    if (error) throw new Error(error.message);
+    return (data || []).map(mapPlanDetail);
   }
 
   static async getPlan(planId: string): Promise<PlanDetail> {
-    const store = await FileStore.read();
-    const plan = store.plans.find((item) => item.id === planId);
+    const { data, error } = await supabase
+      .from("plans")
+      .select("*, plan_participants(*), locations(*)")
+      .eq("id", planId)
+      .maybeSingle();
 
-    if (!plan) {
+    if (error || !data) {
       throw new NotFoundError("Plan not found");
     }
-
-    return detailForPlan(store, plan);
+    return mapPlanDetail(data);
   }
 
   static async getPlanForOwner(planId: string, ownerId: string): Promise<PlanDetail> {
@@ -57,91 +81,82 @@ export class PlanService {
   }
 
   static async getPlanByToken(token: string): Promise<PlanDetail> {
-    const store = await FileStore.read();
-    const plan = store.plans.find((item) => item.shareToken === token);
+    const { data, error } = await supabase
+      .from("plans")
+      .select("*, plan_participants(*), locations(*)")
+      .eq("share_token", token)
+      .maybeSingle();
 
-    if (!plan) {
+    if (error || !data) {
       throw new NotFoundError("Plan not found");
     }
 
-    if (plan.expiresAt && new Date(plan.expiresAt).getTime() < Date.now()) {
+    if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) {
       throw new NotFoundError("Plan has expired");
     }
 
-    return detailForPlan(store, plan);
+    return mapPlanDetail(data);
   }
 
   static async createPlan(ownerId: string, input: CreatePlanInput): Promise<PlanDetail> {
-    return FileStore.update((store) => {
-      let token = generateShareToken();
-      while (store.plans.some((plan) => plan.shareToken === token)) {
-        token = generateShareToken();
+    let token = generateShareToken();
+    let isUnique = false;
+    
+    // retry logic for unique token
+    for (let i = 0; i < 5; i++) {
+      const { count } = await supabase.from("plans").select("*", { count: "exact", head: true }).eq("share_token", token);
+      if (count === 0) {
+        isUnique = true;
+        break;
       }
+      token = generateShareToken();
+    }
+    
+    if (!isUnique) throw new Error("Could not generate a unique share token");
 
-      const timestamp = now();
-      const plan: Plan = {
-        id: crypto.randomUUID(),
-        ownerId,
+    const { data, error } = await supabase
+      .from("plans")
+      .insert({
+        owner_id: ownerId,
         title: input.title?.trim() || "Our Meeting Point",
-        shareToken: token,
+        share_token: token,
         status: "active",
-        radiusMeters: input.radiusMeters ?? 1000,
-        midpointLat: null,
-        midpointLng: null,
-        maxParticipants: 20,
-        expiresAt: null,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      };
+        radius_meters: input.radiusMeters ?? 1000,
+        max_participants: 20
+      })
+      .select("*, plan_participants(*), locations(*)")
+      .single();
 
-      store.plans.push(plan);
-      return detailForPlan(store, plan);
-    });
+    if (error || !data) throw new Error(error?.message || "Failed to create plan");
+
+    return mapPlanDetail(data);
   }
 
   static async updatePlan(planId: string, ownerId: string, input: UpdatePlanInput): Promise<PlanDetail> {
-    return FileStore.update((store) => {
-      const plan = store.plans.find((item) => item.id === planId);
-      if (!plan) {
-        throw new NotFoundError("Plan not found");
-      }
+    const plan = await PlanService.getPlan(planId);
+    if (plan.ownerId !== ownerId) {
+      throw new ForbiddenError("Only the owner can update this plan");
+    }
 
-      if (plan.ownerId !== ownerId) {
-        throw new ForbiddenError("Only the owner can update this plan");
-      }
+    const updates: any = { updated_at: new Date().toISOString() };
+    if (input.title !== undefined) updates.title = input.title.trim() || plan.title;
+    if (input.radiusMeters !== undefined) updates.radius_meters = input.radiusMeters;
+    if (input.status !== undefined) updates.status = input.status;
 
-      if (input.title !== undefined) {
-        plan.title = input.title.trim() || plan.title;
-      }
+    const { error } = await supabase.from("plans").update(updates).eq("id", planId);
+    if (error) throw new Error(error.message);
 
-      if (input.radiusMeters !== undefined) {
-        plan.radiusMeters = input.radiusMeters;
-      }
-
-      if (input.status !== undefined) {
-        plan.status = input.status as PlanStatus;
-      }
-
-      plan.updatedAt = now();
-      return detailForPlan(store, plan);
-    });
+    return PlanService.getPlan(planId);
   }
 
   static async deletePlan(planId: string, ownerId: string): Promise<void> {
-    return FileStore.update((store) => {
-      const plan = store.plans.find((item) => item.id === planId);
-      if (!plan) {
-        throw new NotFoundError("Plan not found");
-      }
+    const plan = await PlanService.getPlan(planId);
+    if (plan.ownerId !== ownerId) {
+      throw new ForbiddenError("Only the owner can delete this plan");
+    }
 
-      if (plan.ownerId !== ownerId) {
-        throw new ForbiddenError("Only the owner can delete this plan");
-      }
-
-      store.plans = store.plans.filter((item) => item.id !== planId);
-      store.participants = store.participants.filter((item) => item.planId !== planId);
-      store.locations = store.locations.filter((item) => item.planId !== planId);
-    });
+    const { error } = await supabase.from("plans").delete().eq("id", planId);
+    if (error) throw new Error(error.message);
   }
 
   static async addLocation(planId: string, input: LocationInput & { userId?: string | null }): Promise<{
@@ -154,78 +169,88 @@ export class PlanService {
       throw new ConflictError("Invalid coordinates");
     }
 
-    return FileStore.update((store) => {
-      const plan = store.plans.find((item) => item.id === planId);
-      if (!plan) {
-        throw new NotFoundError("Plan not found");
-      }
+    const plan = await PlanService.getPlan(planId);
+    if (plan.status !== "active") {
+      throw new ConflictError("Plan is not accepting new locations");
+    }
 
-      if (plan.status !== "active") {
-        throw new ConflictError("Plan is not accepting new locations");
-      }
+    let participant = input.participantId ? plan.participants.find(p => p.id === input.participantId) : undefined;
+    
+    if (!participant && input.userId) {
+      participant = plan.participants.find(p => p.userId === input.userId);
+    }
 
-      const existingByParticipantId = input.participantId
-        ? store.participants.find((participant) => participant.id === input.participantId && participant.planId === planId)
-        : undefined;
+    if (!participant && plan.participants.length >= plan.maxParticipants) {
+      throw new ConflictError("Participant limit reached");
+    }
 
-      const existingByUser = input.userId
-        ? store.participants.find((participant) => participant.planId === planId && participant.userId === input.userId)
-        : undefined;
-
-      let participant = existingByParticipantId ?? existingByUser;
-      const participantCount = store.participants.filter((item) => item.planId === planId).length;
-
-      if (!participant && participantCount >= plan.maxParticipants) {
-        throw new ConflictError("Participant limit reached");
-      }
-
-      if (!participant) {
-        participant = {
-          id: crypto.randomUUID(),
-          planId,
-          userId: input.userId ?? null,
+    if (!participant) {
+      const { data: pData, error: pError } = await supabase
+        .from("plan_participants")
+        .insert({
+          plan_id: planId,
+          user_id: input.userId ?? null,
           nickname: input.nickname.trim().slice(0, 100) || "Guest",
-          avatarColor: colorForSeed(`${planId}:${input.nickname}:${participantCount}`),
-          joinedAt: now()
-        };
-
-        store.participants.push(participant);
-      } else {
-        participant.nickname = input.nickname.trim().slice(0, 100) || participant.nickname;
+          avatar_color: colorForSeed(`${planId}:${input.nickname}:${plan.participants.length}`)
+        })
+        .select("*")
+        .single();
+        
+      if (pError || !pData) throw new Error(pError?.message || "Failed to add participant");
+      participant = mapPlanDetail({ plan_participants: [pData] }).participants[0];
+    } else {
+      const newNickname = input.nickname.trim().slice(0, 100) || participant.nickname;
+      if (newNickname !== participant.nickname) {
+        await supabase.from("plan_participants").update({ nickname: newNickname }).eq("id", participant.id);
+        participant.nickname = newNickname;
       }
+    }
 
-      let location = store.locations.find((item) => item.planId === planId && item.participantId === participant.id);
-      const timestamp = now();
+    let location = plan.locations.find(l => l.participantId === participant!.id);
+    const displayName = input.displayName.trim() || `${input.lat.toFixed(5)}, ${input.lng.toFixed(5)}`;
 
-      if (!location) {
-        location = {
-          id: crypto.randomUUID(),
-          participantId: participant.id,
-          planId,
-          displayName: input.displayName.trim() || `${input.lat.toFixed(5)}, ${input.lng.toFixed(5)}`,
+    if (!location) {
+      const { data: lData, error: lError } = await supabase
+        .from("locations")
+        .insert({
+          participant_id: participant.id,
+          plan_id: planId,
+          display_name: displayName,
+          lat: input.lat,
+          lng: input.lng
+        })
+        .select("*")
+        .single();
+      
+      if (lError || !lData) throw new Error(lError?.message || "Failed to add location");
+      location = mapPlanDetail({ locations: [lData] }).locations[0];
+    } else {
+      const { data: lData, error: lError } = await supabase
+        .from("locations")
+        .update({
+          display_name: displayName,
           lat: input.lat,
           lng: input.lng,
-          createdAt: timestamp,
-          updatedAt: timestamp
-        };
-        store.locations.push(location);
-      } else {
-        location.displayName = input.displayName.trim() || location.displayName;
-        location.lat = input.lat;
-        location.lng = input.lng;
-        location.updatedAt = timestamp;
-      }
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", location.id)
+        .select("*")
+        .single();
+        
+      if (lError || !lData) throw new Error(lError?.message || "Failed to update location");
+      location = mapPlanDetail({ locations: [lData] }).locations[0];
+    }
 
-      const midpoint = recalculatePlanMidpoint(store, plan);
-      plan.updatedAt = timestamp;
+    // After updating, refetch to calculate midpoint
+    const updatedPlan = await PlanService.getPlan(planId);
+    const midpoint = await recalculatePlanMidpoint(updatedPlan);
 
-      return {
-        participant,
-        location,
-        midpoint,
-        plan: detailForPlan(store, plan)
-      };
-    });
+    return {
+      participant: participant!,
+      location: location!,
+      midpoint,
+      plan: await PlanService.getPlan(planId)
+    };
   }
 
   static async removeLocation(
@@ -233,61 +258,51 @@ export class PlanService {
     locId: string,
     requester: { ownerId?: string | null; participantId?: string | null }
   ): Promise<PlanDetail> {
-    return FileStore.update((store) => {
-      const plan = store.plans.find((item) => item.id === planId);
-      if (!plan) {
-        throw new NotFoundError("Plan not found");
-      }
+    const plan = await PlanService.getPlan(planId);
+    const location = plan.locations.find(l => l.id === locId);
+    
+    if (!location) throw new NotFoundError("Location not found");
 
-      const location = store.locations.find((item) => item.id === locId && item.planId === planId);
-      if (!location) {
-        throw new NotFoundError("Location not found");
-      }
+    const isOwner = requester.ownerId === plan.ownerId;
+    const isParticipant = requester.participantId === location.participantId;
 
-      const isOwner = requester.ownerId === plan.ownerId;
-      const isParticipant = requester.participantId === location.participantId;
+    if (!isOwner && !isParticipant) {
+      throw new ForbiddenError("Only the owner or participant can remove this location");
+    }
 
-      if (!isOwner && !isParticipant) {
-        throw new ForbiddenError("Only the owner or participant can remove this location");
-      }
+    await supabase.from("locations").delete().eq("id", locId);
+    await supabase.from("plan_participants").delete().eq("id", location.participantId);
 
-      store.locations = store.locations.filter((item) => item.id !== locId);
-      store.participants = store.participants.filter((item) => item.id !== location.participantId);
-      recalculatePlanMidpoint(store, plan);
-      plan.updatedAt = now();
+    const updatedPlan = await PlanService.getPlan(planId);
+    await recalculatePlanMidpoint(updatedPlan);
 
-      return detailForPlan(store, plan);
-    });
+    return PlanService.getPlan(planId);
   }
 
   static async recalculateMidpoint(planId: string): Promise<{ lat: number; lng: number } | null> {
-    return FileStore.update((store) => {
-      const plan = store.plans.find((item) => item.id === planId);
-      if (!plan) {
-        throw new NotFoundError("Plan not found");
-      }
-
-      plan.updatedAt = now();
-      return recalculatePlanMidpoint(store, plan);
-    });
+    const plan = await PlanService.getPlan(planId);
+    return recalculatePlanMidpoint(plan);
   }
 }
 
-function recalculatePlanMidpoint(store: Awaited<ReturnType<typeof FileStore.read>>, plan: Plan): { lat: number; lng: number } | null {
-  const planLocations = store.locations.filter((location) => location.planId === plan.id);
+async function recalculatePlanMidpoint(plan: PlanDetail): Promise<{ lat: number; lng: number } | null> {
+  const planLocations = plan.locations;
 
   if (planLocations.length === 0) {
-    plan.midpointLat = null;
-    plan.midpointLng = null;
+    await supabase.from("plans").update({ midpoint_lat: null, midpoint_lng: null, updated_at: new Date().toISOString() }).eq("id", plan.id);
     return null;
   }
 
   const midpoint = calculateMidpoint(planLocations.map((location) => ({ lat: location.lat, lng: location.lng })));
-  plan.midpointLat = Number(midpoint.lat.toFixed(8));
-  plan.midpointLng = Number(midpoint.lng.toFixed(8));
+  
+  await supabase.from("plans").update({ 
+    midpoint_lat: Number(midpoint.lat.toFixed(8)), 
+    midpoint_lng: Number(midpoint.lng.toFixed(8)),
+    updated_at: new Date().toISOString()
+  }).eq("id", plan.id);
 
   return {
-    lat: plan.midpointLat,
-    lng: plan.midpointLng
+    lat: Number(midpoint.lat.toFixed(8)),
+    lng: Number(midpoint.lng.toFixed(8))
   };
 }
