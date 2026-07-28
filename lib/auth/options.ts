@@ -95,11 +95,8 @@ export const authOptions: AuthOptions = {
     }
   },
   events: {
-    async signIn({ user, account, profile, isNewUser }) {
+    async signIn({ user, account, isNewUser }) {
       console.log("[NextAuth] User signed in:", { email: user.email, provider: account?.provider, isNewUser });
-    },
-    async error({ error }) {
-      console.error("[NextAuth] Error:", error);
     }
   }
 };

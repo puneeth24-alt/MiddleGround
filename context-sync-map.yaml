@@ -1,0 +1,230 @@
+project_goal:
+  name: MiddleGround
+  summary: >
+    Build a collaborative meeting-point planner where an owner creates a shareable
+    plan, participants add locations, the app calculates the geographic midpoint,
+    and nearby cafes, restaurants, and pubs are suggested around that midpoint.
+  source_architecture: C:\Users\R J Surya Prakash\Downloads\middleground-architecture.md
+  current_target: Locally runnable MVP and Vercel-ready production architecture.
+
+architecture:
+  framework: Next.js App Router with TypeScript and React.
+  styling: Tailwind CSS plus small global CSS for map markers.
+  auth:
+    library: NextAuth v4.
+    implemented_providers:
+      - Optional GitHub provider when OAuth env vars are configured.
+      - Optional Google provider when OAuth env vars are configured.
+      - Credentials provider using bcryptjs for secure password hashing.
+  persistence:
+    current: Supabase PostgreSQL database via @supabase/supabase-js.
+    production_path: Supabase is fully configured for production deployment.
+  domain_layers:
+    services:
+      - PlanService owns plans, participants, locations, midpoint, owner moderation, and caps (backed by Supabase).
+      - PlacesService owns Geoapify calls, local fallback places, normalization, and LRU caching.
+      - LocationService (now unified under Geoapify and MapLibre helpers).
+      - AuthService owns Supabase user authentication and registration logic.
+    api_routes: Thin validation and orchestration around services.
+    ui: App Router pages compose client components, React Query hooks, and service-backed APIs.
+  maps_and_places:
+    maplibre: Rendering map tiles using open-source MapLibre GL JS (configured with demotiles).
+    geoapify_places: Used for both geocoding (search) and nearby places retrieval.
+    local_places_fallback: Deterministic mock venue suggestions used when Geoapify key is absent.
+  realtime:
+    current: SSE-shaped polling stream at /api/plans/[id]/events that emits plan change events.
+    production_recommendation: Replace polling internals with Supabase Realtime subscriptions.
+
+repository_structure:
+  app:
+    purpose: Next.js routes, API route handlers, layouts, and providers.
+    notable_routes:
+      - /login
+      - /dashboard
+      - /plans/[id]
+      - /join/[token]
+      - /api/plans
+      - /api/plans/[id]
+      - /api/plans/[id]/locations
+      - /api/plans/[id]/locations/[locId]
+      - /api/plans/[id]/midpoint
+      - /api/plans/[id]/events
+      - /api/places
+      - /api/join/[token]
+      - /api/auth/[...nextauth]
+      - /api/auth/register
+  components:
+    purpose: Client UI split by feature.
+    groups:
+      - auth
+      - dashboard
+      - join
+      - map
+      - places
+      - plan
+      - ui
+  hooks:
+    purpose: React Query and derived client hooks.
+  lib:
+    purpose: Auth options/session helpers, env validation, HTTP helpers, Supabase client.
+  services:
+    purpose: Framework-light business logic.
+  types:
+    purpose: Shared TypeScript DTOs and module augmentation.
+  utils:
+    purpose: Geo math, formatting, token generation, and avatar color helpers.
+
+key_files:
+  package_json: package.json
+  readme: README.md
+  app_layout: app/layout.tsx
+  providers: app/providers.tsx
+  middleware: middleware.ts
+  auth_options: lib/auth/options.ts
+  supabase_client: lib/supabase/client.ts
+  supabase_schema: supabase-schema.sql
+  plan_service: services/PlanService.ts
+  places_service: services/PlacesService.ts
+  auth_service: services/AuthService.ts
+  geo_utils: utils/geo.ts
+  dashboard_page: app/dashboard/page.tsx
+  plan_page: app/plans/[id]/page.tsx
+  join_page: app/join/[token]/page.tsx
+  plan_workspace: components/plan/PlanWorkspace.tsx
+  join_client: components/join/JoinPlanClient.tsx
+  map_container: components/map/MapContainer.tsx
+
+important_decisions:
+  - decision: MapLibre GL for rendering.
+    rationale: Eliminates the need for proprietary Mapbox licensing.
+  - decision: Geoapify for both geocoding and places.
+    rationale: Consolidates location APIs under a single service provider.
+  - decision: Supabase client over Drizzle ORM.
+    rationale: User requested simple Supabase storage over a complex Drizzle ORM setup for easier mapping.
+  - decision: Use NextAuth credentials provider with bcryptjs.
+    rationale: Allows local user registration and sign-in directly using Supabase table records.
+  - decision: Keep API routes service-oriented and validation-focused.
+    rationale: Minimizes coupling between UI, route handlers, and persistence implementation.
+
+completed_work:
+  scaffold:
+    - Added Next.js 15 App Router TypeScript project files.
+    - Added Tailwind, PostCSS, Next config, TypeScript config, package lock, and npm scripts.
+  auth:
+    - Added NextAuth route handler and configuration.
+    - Added local credentials sign-in and sign-up with bcryptjs.
+    - Added optional GitHub and Google provider wiring.
+    - Added route middleware for dashboard and plan owner routes.
+  data_model:
+    - Added shared DTOs for plans, participants, locations, places, and store records.
+    - Removed local JSON file store and Drizzle ORM.
+    - Migrated entirely to Supabase PostgreSQL database schema.
+  api:
+    - Implemented plan list/create/detail/update/delete via Supabase.
+    - Implemented public join lookup by token via Supabase.
+    - Implemented add/remove location via Supabase.
+    - Implemented midpoint recalculation via Supabase.
+    - Implemented places proxy with cache and fallback suggestions.
+    - Implemented Geocoding Server Action using Geoapify.
+  ui:
+    - Implemented login/home screen with sign in / sign up toggles.
+    - Implemented dashboard and create-plan form, with Sign Out and Delete Plan buttons.
+    - Implemented owner plan workspace.
+    - Implemented public participant join flow.
+    - Implemented location entry with browser geolocation and Geoapify support.
+    - Implemented participant list and owner removal controls.
+    - Implemented MapLibre map rendering instead of Mapbox.
+  docs:
+    - Rewrote README with local run, env, product flow, and architecture notes.
+    - Generated Vercel deployment plan.
+
+current_work:
+  status: Supabase and MapLibre migration completed.
+  last_activity: >
+    Migrated from FileStore/Drizzle to Supabase. Switched Mapbox to MapLibre.
+    Switched geocoding to Geoapify.
+  active_branch: main
+
+known_issues:
+  - issue: .env.local.example is missing from the working tree according to git status.
+    impact: README references copying it, but the file is currently absent.
+    suggested_fix: Recreate .env.local.example or decide whether the local .env.local should be the only env reference.
+  - issue: npm audit reported 9 vulnerabilities during install, including 1 high severity.
+    impact: Dependency risk needs review before production deployment.
+    suggested_fix: Run npm audit, inspect affected packages, and avoid blind npm audit fix --force unless breaking changes are acceptable.
+  - issue: SSE event endpoint currently polls updatedAt.
+    impact: Works for MVP but is not an efficient production event bus.
+    suggested_fix: Use Supabase Realtime subscriptions.
+  - issue: Rate limiting is not implemented.
+    impact: Geoapify and location endpoints are not protected against abuse.
+    suggested_fix: Add Upstash Redis/ratelimit or equivalent.
+
+constraints:
+  filesystem: Work must stay inside D:\MiddleGround unless explicit approval is granted.
+  network: Network access is restricted and package downloads may require approval.
+  secrets: Do not commit .env.local or real API credentials.
+  production_credentials_needed:
+    - NEXTAUTH_SECRET
+    - NEXTAUTH_URL
+    - NEXT_PUBLIC_SUPABASE_URL
+    - SUPABASE_SERVICE_ROLE_KEY
+    - GEOAPIFY_API_KEY
+    - AUTH_GITHUB_ID and AUTH_GITHUB_SECRET if GitHub OAuth is used
+    - AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET if Google OAuth is used
+
+next_actions:
+  immediate:
+    - Execute `npm run typecheck` and `npm run build` locally.
+    - Ensure Supabase is configured properly with tables based on `supabase-schema.sql`.
+  short_term:
+    - Add Playwright tests for the critical product flow.
+    - Convert SSE Polling to Supabase Realtime subscriptions.
+  production:
+    - Deploy to Vercel and input environment variables.
+    - Add cron cleanup for expired plans.
+
+risks:
+  - risk: MapLibre demotiles are basic.
+    mitigation: The user may need to switch to MapTiler or Protomaps for production-grade tiles.
+  - risk: Geoapify rate limits.
+    mitigation: Implement Upstash Redis limits for the proxy.
+  - risk: Middleware protects pages but not every API path equally.
+    mitigation: Keep route handlers checking sessions where owner access is required.
+
+development_roadmap:
+  phase_1_foundation:
+    status: mostly_complete_for_local_mvp
+    items:
+      - Next.js project scaffold
+      - Tailwind styling
+      - NextAuth local credentials and Supabase auth
+      - Plan CRUD APIs
+      - Dashboard and share link workflow
+      - Supabase schema present
+  phase_2_location_collection:
+    status: implemented_for_local_mvp
+    items:
+      - Public join page
+      - Participant location add/update
+      - Owner location removal
+      - Participant cap
+      - Cartesian midpoint utility
+      - MapLibre UI with participant pins, midpoint, and radius preview
+  phase_3_places_search:
+    status: implemented_with_fallback
+    items:
+      - Geoapify proxy path and Geocoding server action
+      - LRU cache
+      - Local deterministic fallback places
+      - Category filters
+      - Places sidebar
+      - Hover sync between sidebar and map markers
+  phase_4_collaboration_and_polish:
+    status: partial
+    items:
+      - Owner lock/archive controls implemented
+      - SSE-shaped event endpoint implemented with polling internals
+      - Loading and empty states partially implemented
+      - Rate limiting not implemented
+      - Production deployment to Vercel documented
+      - Automated UI tests not added

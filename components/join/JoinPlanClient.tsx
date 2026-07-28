@@ -38,6 +38,7 @@ export function JoinPlanClient({ initialPlan, token }: { initialPlan: PlanDetail
     planId: plan.id,
     categories,
     radiusMeters: plan.radiusMeters,
+    midpoint,
     enabled: midpoint !== null
   });
 

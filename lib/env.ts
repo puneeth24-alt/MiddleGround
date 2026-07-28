@@ -3,6 +3,7 @@ import { z } from "zod";
 const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   GEOAPIFY_API_KEY: z.string().optional(),
+  GEOAPIF_API_KEY: z.string().optional(),
   NEXTAUTH_SECRET: z.string().optional(),
   NEXTAUTH_URL: z.string().url().optional(),
   AUTH_GITHUB_ID: z.string().optional(),
@@ -16,7 +17,8 @@ const envSchema = z.object({
 
 export const env = envSchema.parse({
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-  GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY,
+  GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY || process.env.GEOAPIF_API_KEY,
+  GEOAPIF_API_KEY: process.env.GEOAPIF_API_KEY,
   NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
   NEXTAUTH_URL: process.env.NEXTAUTH_URL,
   AUTH_GITHUB_ID: process.env.AUTH_GITHUB_ID,

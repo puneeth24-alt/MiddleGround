@@ -1,14 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Map, Marker } from "maplibre-gl";
+import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import type { ParticipantLocation } from "@/types/location";
 import type { NormalisedPlace } from "@/types/places";
 import type { PlanParticipant } from "@/types/participant";
-import { ParticipantMarker } from "@/components/map/ParticipantMarker";
-import { MidpointMarker } from "@/components/map/MidpointMarker";
-import { PlaceMarker } from "@/components/map/PlaceMarker";
-import { VicinityCircle } from "@/components/map/VicinityCircle";
 
 interface ParticipantPin extends PlanParticipant {
   location: ParticipantLocation | null;
@@ -23,13 +19,7 @@ interface MapContainerProps {
   onPlaceHover?: (id: string | null) => void;
 }
 
-interface ProjectedPoint {
-  id: string;
-  lat: number;
-  lng: number;
-  x: number;
-  y: number;
-}
+const MAP_STYLE = "https://demotiles.maplibre.org/style.json";
 
 export function MapContainer({
   participants,
@@ -40,200 +30,173 @@ export function MapContainer({
   onPlaceHover
 }: MapContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<Map | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
   const markerRefs = useRef<Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
   const participantLocations = useMemo(
-    () => participants.filter((participant) => participant.location),
+    () => participants.filter((p) => p.location),
     [participants]
   );
 
-  const center = midpoint ?? participantLocations[0]?.location ?? places[0] ?? { lat: 20, lng: 0 };
+  const center = useMemo(
+    () => midpoint ?? participantLocations[0]?.location ?? places[0] ?? { lat: 20, lng: 0 },
+    [midpoint, participantLocations, places]
+  );
 
+  // Mount the map exactly once on component mount
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) {
-      return;
-    }
+    if (!containerRef.current || mapRef.current) return;
 
     let cancelled = false;
 
-    async function mountMap() {
-      const module = await import("maplibre-gl");
-      const maplibregl = module.default;
-
-      if (cancelled || !containerRef.current) {
-        return;
-      }
+    (async () => {
+      const maplibregl = (await import("maplibre-gl")).default;
+      if (cancelled || !containerRef.current) return;
 
       const map = new maplibregl.Map({
         container: containerRef.current,
-        style: "https://demotiles.maplibre.org/style.json",
+        style: MAP_STYLE,
         center: [center.lng, center.lat],
-        zoom: participantLocations.length > 1 ? 10 : 12
+        zoom: participantLocations.length > 0 ? 12 : 4
       });
 
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-      map.on("load", () => setMapReady(true));
-      mapRef.current = map;
-    }
+      map.on("load", () => {
+        if (!cancelled) setMapReady(true);
+      });
 
-    mountMap();
+      mapRef.current = map;
+    })();
 
     return () => {
       cancelled = true;
-      markerRefs.current.forEach((marker) => marker.remove());
+      markerRefs.current.forEach((m) => m.remove());
       markerRefs.current = [];
       mapRef.current?.remove();
       mapRef.current = null;
       setMapReady(false);
     };
-  }, [center.lat, center.lng, participantLocations.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Re-render markers and update viewport whenever data changes
   useEffect(() => {
-    if (!mapReady || !mapRef.current) {
-      return;
-    }
+    if (!mapReady || !mapRef.current) return;
 
     let disposed = false;
 
-    async function renderMarkers() {
-      const module = await import("maplibre-gl");
-      const maplibregl = module.default;
+    (async () => {
+      const maplibregl = (await import("maplibre-gl")).default;
       const map = mapRef.current;
+      if (!map || disposed) return;
 
-      if (!map || disposed) {
-        return;
-      }
-
-      markerRefs.current.forEach((marker) => marker.remove());
+      // Remove all old markers
+      markerRefs.current.forEach((m) => m.remove());
       markerRefs.current = [];
 
+      // Participant pins
       for (const participant of participantLocations) {
-        if (!participant.location) {
-          continue;
-        }
-
-        const element = document.createElement("div");
-        element.className = "maplibre-participant-pin";
-        element.style.backgroundColor = participant.avatarColor;
-        element.textContent = participant.nickname.charAt(0).toUpperCase();
-        markerRefs.current.push(new maplibregl.Marker({ element }).setLngLat([participant.location.lng, participant.location.lat]).addTo(map));
+        if (!participant.location) continue;
+        const el = document.createElement("div");
+        el.className = "maplibre-participant-pin";
+        el.style.backgroundColor = participant.avatarColor;
+        el.textContent = participant.nickname.charAt(0).toUpperCase();
+        markerRefs.current.push(
+          new maplibregl.Marker({ element: el })
+            .setLngLat([participant.location.lng, participant.location.lat])
+            .addTo(map)
+        );
       }
 
+      // Place pins
       places.forEach((place, index) => {
-        const element = document.createElement("button");
-        element.className = `maplibre-place-pin ${selectedPlaceId === place.id ? "is-active" : ""}`;
-        element.textContent = String(index + 1);
-        element.title = place.name;
-        element.addEventListener("mouseenter", () => onPlaceHover?.(place.id));
-        element.addEventListener("mouseleave", () => onPlaceHover?.(null));
-        markerRefs.current.push(new maplibregl.Marker({ element }).setLngLat([place.lng, place.lat]).addTo(map));
+        const el = document.createElement("button");
+        el.className = `maplibre-place-pin${selectedPlaceId === place.id ? " is-active" : ""}`;
+        el.textContent = String(index + 1);
+        el.title = place.name;
+        el.addEventListener("mouseenter", () => onPlaceHover?.(place.id));
+        el.addEventListener("mouseleave", () => onPlaceHover?.(null));
+        markerRefs.current.push(
+          new maplibregl.Marker({ element: el })
+            .setLngLat([place.lng, place.lat])
+            .addTo(map)
+        );
       });
 
+      // Midpoint pin + radius circle
       if (midpoint) {
-        const element = document.createElement("div");
-        element.className = "maplibre-midpoint-pin";
-        markerRefs.current.push(new maplibregl.Marker({ element }).setLngLat([midpoint.lng, midpoint.lat]).addTo(map));
+        const el = document.createElement("div");
+        el.className = "maplibre-midpoint-pin";
+        markerRefs.current.push(
+          new maplibregl.Marker({ element: el })
+            .setLngLat([midpoint.lng, midpoint.lat])
+            .addTo(map)
+        );
         upsertCircle(map, midpoint, radiusMeters);
       }
 
-      const coordinates = [
-        ...participantLocations.flatMap((participant) => (participant.location ? [[participant.location.lng, participant.location.lat] as [number, number]] : [])),
-        ...places.map((place) => [place.lng, place.lat] as [number, number]),
-        ...(midpoint ? ([[midpoint.lng, midpoint.lat]] as [number, number][]) : [])
+      // Fit viewport to all visible points
+      const coords: [number, number][] = [
+        ...participantLocations.flatMap((p) =>
+          p.location ? [[p.location.lng, p.location.lat] as [number, number]] : []
+        ),
+        ...places.map((p) => [p.lng, p.lat] as [number, number]),
+        ...(midpoint ? [[midpoint.lng, midpoint.lat] as [number, number]] : [])
       ];
 
-      if (coordinates.length > 1) {
-        const bounds = coordinates.reduce((box, coord) => box.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
-        map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 600 });
-      } else {
-        map.easeTo({ center: [center.lng, center.lat], zoom: 12, duration: 600 });
+      if (coords.length > 1) {
+        const bounds = coords.reduce(
+          (box, coord) => box.extend(coord),
+          new maplibregl.LngLatBounds(coords[0], coords[0])
+        );
+        map.fitBounds(bounds, { padding: 80, maxZoom: 15, duration: 500 });
+      } else if (coords.length === 1) {
+        map.easeTo({ center: coords[0], zoom: 13, duration: 400 });
       }
-    }
-
-    renderMarkers();
+    })();
 
     return () => {
       disposed = true;
     };
-  }, [center.lat, center.lng, mapReady, midpoint, onPlaceHover, participantLocations, places, radiusMeters, selectedPlaceId]);
+  }, [mapReady, midpoint, onPlaceHover, participantLocations, places, radiusMeters, selectedPlaceId]);
 
-  return <div ref={containerRef} className="min-h-[460px] overflow-hidden rounded-md border border-neutral-200 bg-neutral-100" />;
+  return (
+    <div
+      ref={containerRef}
+      style={{ height: "460px" }}
+      className="w-full overflow-hidden rounded-md border border-neutral-200 bg-neutral-100"
+    />
+  );
 }
 
-function useFallbackProjection(participants: ParticipantPin[], places: NormalisedPlace[], midpoint: { lat: number; lng: number } | null) {
-  return useMemo(() => {
-    const points = [
-      ...participants.flatMap((participant) =>
-        participant.location ? [{ id: participant.id, lat: participant.location.lat, lng: participant.location.lng }] : []
-      ),
-      ...places.map((place) => ({ id: place.id, lat: place.lat, lng: place.lng })),
-      ...(midpoint ? [{ id: "midpoint", lat: midpoint.lat, lng: midpoint.lng }] : [])
-    ];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-    if (points.length === 0) {
-      return {
-        participants: [] as ProjectedPoint[],
-        places: [] as ProjectedPoint[],
-        midpoint: null as ProjectedPoint | null
-      };
-    }
-
-    let minLat = Math.min(...points.map((point) => point.lat));
-    let maxLat = Math.max(...points.map((point) => point.lat));
-    let minLng = Math.min(...points.map((point) => point.lng));
-    let maxLng = Math.max(...points.map((point) => point.lng));
-
-    if (Math.abs(maxLat - minLat) < 0.01) {
-      minLat -= 0.01;
-      maxLat += 0.01;
-    }
-
-    if (Math.abs(maxLng - minLng) < 0.01) {
-      minLng -= 0.01;
-      maxLng += 0.01;
-    }
-
-    const project = (point: { id: string; lat: number; lng: number }): ProjectedPoint => ({
-      ...point,
-      x: 10 + ((point.lng - minLng) / (maxLng - minLng)) * 80,
-      y: 90 - ((point.lat - minLat) / (maxLat - minLat)) * 80
-    });
-
-    return {
-      participants: participants.flatMap((participant) => (participant.location ? [project({ ...participant.location, id: participant.id })] : [])),
-      places: places.map((place) => project(place)),
-      midpoint: midpoint ? project({ id: "midpoint", ...midpoint }) : null
-    };
-  }, [midpoint, participants, places]);
-}
-
-function upsertCircle(map: Map, midpoint: { lat: number; lng: number }, radiusMeters: number) {
+function upsertCircle(
+  map: MapLibreMap,
+  midpoint: { lat: number; lng: number },
+  radiusMeters: number
+) {
   const sourceId = "middleground-radius";
-  const layerId = "middleground-radius-fill";
+  const fillId = "middleground-radius-fill";
   const outlineId = "middleground-radius-outline";
   const data = createCircle(midpoint, radiusMeters);
 
-  const source = map.getSource(sourceId) as { setData?: (data: unknown) => void } | undefined;
-  if (source?.setData) {
-    source.setData(data);
+  const existing = map.getSource(sourceId) as { setData?: (d: unknown) => void } | undefined;
+  if (existing?.setData) {
+    existing.setData(data);
     return;
   }
 
-  map.addSource(sourceId, {
-    type: "geojson",
-    data
-  });
+  map.addSource(sourceId, { type: "geojson", data });
 
   map.addLayer({
-    id: layerId,
+    id: fillId,
     type: "fill",
     source: sourceId,
-    paint: {
-      "fill-color": "#10b981",
-      "fill-opacity": 0.12
-    }
+    paint: { "fill-color": "#10b981", "fill-opacity": 0.12 }
   });
 
   map.addLayer({
@@ -249,24 +212,20 @@ function upsertCircle(map: Map, midpoint: { lat: number; lng: number }, radiusMe
 }
 
 function createCircle(center: { lat: number; lng: number }, radiusMeters: number) {
-  const points = 72;
-  const coordinates: [number, number][] = [];
-  const distanceX = radiusMeters / (111320 * Math.cos((center.lat * Math.PI) / 180));
-  const distanceY = radiusMeters / 110540;
+  const steps = 72;
+  const coords: [number, number][] = [];
+  const dx = radiusMeters / (111320 * Math.cos((center.lat * Math.PI) / 180));
+  const dy = radiusMeters / 110540;
 
-  for (let i = 0; i < points; i += 1) {
-    const theta = (i / points) * (2 * Math.PI);
-    coordinates.push([center.lng + distanceX * Math.cos(theta), center.lat + distanceY * Math.sin(theta)]);
+  for (let i = 0; i < steps; i++) {
+    const theta = (i / steps) * 2 * Math.PI;
+    coords.push([center.lng + dx * Math.cos(theta), center.lat + dy * Math.sin(theta)]);
   }
-
-  coordinates.push(coordinates[0]);
+  coords.push(coords[0]); // close ring
 
   return {
     type: "Feature" as const,
-    geometry: {
-      type: "Polygon" as const,
-      coordinates: [coordinates]
-    },
+    geometry: { type: "Polygon" as const, coordinates: [coords] },
     properties: {}
   };
 }

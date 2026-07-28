@@ -6,7 +6,7 @@
 
 :root {
   color-scheme: light;
-  background: #fafafa;
+  background: #964444;
 }
 
 * {
@@ -71,6 +71,7 @@ a {
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4), 0 2px 4px rgba(0, 0, 0, 0.1);
   position: relative;
   z-index: 10;
+  overflow: visible;
 }
 
 .maplibre-midpoint-pin::before {
@@ -119,15 +120,16 @@ a {
 
 .maplibre-participant-pin {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border: 3px solid white;
-  border-radius: 999px;
+  line-height: 1;
+  border: 2px solid white;
+  border-radius: 50%;
   color: white;
-  font-size: 12px;
-  font-weight: 800;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.24);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.24);
 }
 
 @keyframes pulse {

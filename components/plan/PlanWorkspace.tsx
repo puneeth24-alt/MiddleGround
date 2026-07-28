@@ -37,6 +37,7 @@ export function PlanWorkspace({ initialPlan, appUrl }: { initialPlan: PlanDetail
     planId: plan.id,
     categories,
     radiusMeters: plan.radiusMeters,
+    midpoint,
     enabled: midpoint !== null
   });
 
@@ -121,7 +122,6 @@ export function PlanWorkspace({ initialPlan, appUrl }: { initialPlan: PlanDetail
 
   async function refreshMidpointAndPlaces() {
     await midpointMutation.mutateAsync();
-    await placesQuery.refetch();
   }
 
   return (

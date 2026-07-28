@@ -5,11 +5,14 @@ import { PlacesService } from "@/services/PlacesService";
 import { PlanService } from "@/services/PlanService";
 
 const categoriesFallback = ["catering.cafe", "catering.restaurant", "catering.pub"];
+const allowedCategories = new Set(categoriesFallback);
 
 const placesQuerySchema = z.object({
   planId: z.string().min(1),
   categories: z.string().optional(),
-  radius: z.coerce.number().int().min(250).max(5000).optional()
+  radius: z.coerce.number().int().min(250).max(5000).optional(),
+  midpointLat: z.coerce.number().min(-90).max(90).optional(),
+  midpointLng: z.coerce.number().min(-180).max(180).optional()
 });
 
 export const dynamic = "force-dynamic";
@@ -20,7 +23,9 @@ export async function GET(req: Request) {
     const parsed = placesQuerySchema.safeParse({
       planId: searchParams.get("planId"),
       categories: searchParams.get("categories") ?? undefined,
-      radius: searchParams.get("radius") ?? undefined
+      radius: searchParams.get("radius") ?? undefined,
+      midpointLat: searchParams.get("midpointLat") ?? undefined,
+      midpointLng: searchParams.get("midpointLng") ?? undefined
     });
 
     if (!parsed.success) {
@@ -33,17 +38,25 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Midpoint not yet calculated" }, { status: 409 });
     }
 
-    const categories = parsed.data.categories?.split(",").filter(Boolean) ?? categoriesFallback;
-    const places = await PlacesService.getNearbyPlaces({
+    const midpoint = {
       lat: plan.midpointLat,
-      lng: plan.midpointLng,
+      lng: plan.midpointLng
+    };
+    const categories =
+      parsed.data.categories
+        ?.split(",")
+        .map((category) => category.trim())
+        .filter((category) => allowedCategories.has(category)) ?? categoriesFallback;
+    const places = await PlacesService.getNearbyPlaces({
+      lat: midpoint.lat,
+      lng: midpoint.lng,
       radiusMeters: parsed.data.radius ?? plan.radiusMeters,
-      categories,
+      categories: categories.length > 0 ? categories : categoriesFallback,
       limit: 20
     });
 
     return NextResponse.json({
-      midpoint: { lat: plan.midpointLat, lng: plan.midpointLng },
+      midpoint,
       places
     });
   } catch (error) {
